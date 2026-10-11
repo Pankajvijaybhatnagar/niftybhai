@@ -1,5 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { OptionChainRow } from "../types/optionChain";
+import OIAnalytics from "./oi/OIAnalytics";
+import { fromNseRows, useOIHistory } from "./oi/oiData";
+import StrikeDrawer from "./oi/StrikeDrawer";
+import type { CellMetric, CellSelection } from "./oi/StrikeDrawer";
+import type { SignalLevels } from "./oi/oiMath";
 
 interface Props {
     loading: boolean;
@@ -17,6 +22,12 @@ const OptionChainTable: React.FC<Props> = ({
 
     const pollingRef = useRef<number | null>(null);
     const fetchingRef = useRef(false);
+
+    // UI-only state: which tab is open and which cell's chart drawer is showing
+    const [tab, setTab] = useState<"chain" | "oi">("chain");
+    const [selection, setSelection] = useState<CellSelection | null>(null);
+    const tableWrapRef = useRef<HTMLDivElement>(null);
+    const scrolledForRef = useRef<string | null>(null);
 
     const loadData = async () => {
         if (!fetchOptionChain || fetchingRef.current) return;
@@ -74,6 +85,7 @@ const OptionChainTable: React.FC<Props> = ({
         waitHigh,
         tradeSignal,
         etaText,
+        levels,
     } = useMemo(() => {
         if (!liveData?.length) {
             return {
@@ -85,6 +97,7 @@ const OptionChainTable: React.FC<Props> = ({
                 waitHigh: null,
                 tradeSignal: "WAIT",
                 etaText: "--",
+                levels: null as SignalLevels | null,
             };
         }
 
@@ -439,51 +452,56 @@ const OptionChainTable: React.FC<Props> = ({
                 );
             };
 
+            // clicking any CE / PE number opens that strike's charts
+            const cell = (side: "CE" | "PE", metric: CellMetric) => {
+                const itm = side === "CE" ? strike < spot : strike > spot;
+                const open = () => setSelection({ strike, side, metric });
+                return {
+                    className: `oc-click oc-cell-${side.toLowerCase()}${itm ? " oc-itm" : ""}`,
+                    role: "button",
+                    tabIndex: 0,
+                    title: `${side} ${strike} - click for chart`,
+                    onClick: open,
+                    onKeyDown: (e: React.KeyboardEvent) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            open();
+                        }
+                    },
+                };
+            };
+
             return (
-                <tr key={`${strike}-${index}`}>
-                    <td style={hotStyle("ceOI")}>{cellContent("ceOI", ceOI)}</td>
-                    <td style={hotStyle("ceChg")}>{cellContent("ceChg", ceChg)}</td>
-                    <td>{(row.CE as any)?.lastPrice ?? "-"}</td>
-                    <td style={hotStyle("ceVol")}>{cellContent("ceVol", ceVol)}</td>
+                <tr key={`${strike}-${index}`} data-atm={isATM || undefined}>
+                    <td {...cell("CE", "oi")} style={hotStyle("ceOI")}>{cellContent("ceOI", ceOI)}</td>
+                    <td {...cell("CE", "chg")} style={hotStyle("ceChg")}>{cellContent("ceChg", ceChg)}</td>
+                    <td {...cell("CE", "ltp")}>{(row.CE as any)?.lastPrice ?? "-"}</td>
+                    <td {...cell("CE", "vol")} style={hotStyle("ceVol")}>{cellContent("ceVol", ceVol)}</td>
 
                     <td
+                        className="oc-strike"
                         style={{
-                            textAlign: "center",
-                            minWidth: "180px",
                             backgroundColor: isATM ? "#fbbf24" : undefined,
                             color: isATM ? "#111827" : undefined,
-                            fontWeight: isATM ? "bold" : undefined,
                             outline: isMaxPain ? "3px solid #22c55e" : undefined,
                             outlineOffset: isMaxPain ? "-3px" : undefined,
                         }}
                     >
                         <div>{strike}</div>
-                        {isSupportRow && (
-                            <div style={{ marginTop: "4px", fontSize: "10px" }}>
-                                Support
-                            </div>
-                        )}
-                        {isResistanceRow && (
-                            <div style={{ marginTop: "4px", fontSize: "10px" }}>
-                                Resistance
-                            </div>
-                        )}
-                        {isRoundInRange && (
-                            <div style={{ marginTop: "4px", fontSize: "10px" }}>
-                                Reverse ≈ {reversalLevel}
-                            </div>
-                        )}
-                        {isMaxPain && (
-                            <div style={{ marginTop: "4px", fontSize: "10px", color: "#22c55e" }}>
-                                Max Pain
+                        {(isSupportRow || isResistanceRow || isRoundInRange || isMaxPain) && (
+                            <div className="oc-tags">
+                                {isSupportRow && <span className="oc-tag">Support</span>}
+                                {isResistanceRow && <span className="oc-tag">Resistance</span>}
+                                {isRoundInRange && <span className="oc-tag">Reverse ≈ {reversalLevel}</span>}
+                                {isMaxPain && <span className="oc-tag oc-tag-maxpain">Max Pain</span>}
                             </div>
                         )}
                     </td>
 
-                    <td style={hotStyle("peVol")}>{cellContent("peVol", peVol)}</td>
-                    <td>{(row.PE as any)?.lastPrice ?? "-"}</td>
-                    <td style={hotStyle("peChg")}>{cellContent("peChg", peChg)}</td>
-                    <td style={hotStyle("peOI")}>{cellContent("peOI", peOI)}</td>
+                    <td {...cell("PE", "vol")} style={hotStyle("peVol")}>{cellContent("peVol", peVol)}</td>
+                    <td {...cell("PE", "ltp")}>{(row.PE as any)?.lastPrice ?? "-"}</td>
+                    <td {...cell("PE", "chg")} style={hotStyle("peChg")}>{cellContent("peChg", peChg)}</td>
+                    <td {...cell("PE", "oi")} style={hotStyle("peOI")}>{cellContent("peOI", peOI)}</td>
                 </tr>
             );
         });
@@ -497,66 +515,193 @@ const OptionChainTable: React.FC<Props> = ({
             waitHigh,
             tradeSignal,
             etaText,
+            // the levels above, exposed read-only for the OI charts / forecasts
+            levels: {
+                spot,
+                supportStrike: nearestSupport?.strike ?? null,
+                resistanceStrike: nearestResistance?.strike ?? null,
+                supportField: winningPEField,
+                resistanceField: winningCEField,
+                ceSecondStrike: ceSecondHighestStrike,
+                peSecondStrike: peSecondHighestStrike,
+                atmStrike,
+                maxPainStrike,
+                callBuy,
+                putBuy,
+            } as SignalLevels,
         };
     }, [liveData]);
 
-    if (loading && !liveData.length) return <p>Loading option chain...</p>;
-    if (!liveData.length) return <p>No option chain data found.</p>;
+    // same live data, normalised for the OI charts (read-only - no signal logic involved).
+    // History is recorded here so it keeps tracking whichever tab is open.
+    const oiSource = useMemo(() => fromNseRows(liveData), [liveData]);
+    const oiHistory = useOIHistory(oiSource);
+    const closeDrawer = useCallback(() => setSelection(null), []);
+
+    // bring the ATM row into view once per instrument / expiry
+    useEffect(() => {
+        const wrap = tableWrapRef.current;
+        if (tab !== "chain" || !wrap || !oiSource || scrolledForRef.current === oiSource.id) return;
+        const atmRow = wrap.querySelector<HTMLTableRowElement>("tr[data-atm]");
+        if (!atmRow) return;
+        scrolledForRef.current = oiSource.id;
+        wrap.scrollTop = atmRow.offsetTop - wrap.clientHeight / 2;
+    }, [oiSource, tab]);
+
+    if (loading && !liveData.length) {
+        return (
+            <div className="oc-state">
+                <span className="oc-spinner" aria-hidden="true" /> Loading option chain...
+            </div>
+        );
+    }
+    if (!liveData.length) return <div className="oc-state">No option chain data found.</div>;
+
+    const signalTone =
+        tradeSignal === "CALL BUY" || tradeSignal === "CALL BIAS"
+            ? "good"
+            : tradeSignal === "PUT BUY" || tradeSignal === "PUT BIAS"
+                ? "critical"
+                : "warning";
+    const signalIcon = signalTone === "good" ? "▲" : signalTone === "critical" ? "▼" : "■";
+    const pressureTone = pressureSide === "UPSIDE" ? "good" : pressureSide === "DOWNSIDE" ? "critical" : "warning";
+    const pressureIcon = pressureSide === "UPSIDE" ? "▲" : pressureSide === "DOWNSIDE" ? "▼" : "■";
 
     return (
-        <div style={{ overflowX: "auto" }}>
-            <div
-                style={{
-                    fontSize: "11px",
-                    marginBottom: "8px",
-                    textAlign: "right",
-                }}
-            >
-                Auto Updated: {lastUpdated.toLocaleTimeString()}
-            </div>
-
-            <div
-                style={{
-                    marginBottom: "10px",
-                    padding: "10px 12px",
-                    borderRadius: "8px",
-                    border: "1px solid",
-                    lineHeight: "1.8",
-                    fontSize: "13px",
-                    fontWeight: "bold",
-                }}
-            >
-                <div>Pressure: {pressureSide}</div>
-                <div>CALL BUY: {callBuy ?? "-"}</div>
-                <div>PUT BUY: {putBuy ?? "-"}</div>
-                <div>
-                    WAIT: {waitLow ?? "-"} - {waitHigh ?? "-"}
+        <div className="oc">
+            <div className="oc-signals">
+                <div className={`oc-tile oc-signal oc-tone-${signalTone}`}>
+                    <div className="oc-tile-label">Signal</div>
+                    <div className="oc-tile-value">
+                        <span className="oc-icon" aria-hidden="true">{signalIcon}</span>
+                        {tradeSignal}
+                    </div>
+                    <div className="oc-tile-sub">Expected move time: {etaText}</div>
                 </div>
-                <div>Signal: {tradeSignal}</div>
-                <div>Expected Move Time: {etaText}</div>
+                <div className={`oc-tile oc-tone-${pressureTone}`}>
+                    <div className="oc-tile-label">Pressure</div>
+                    <div className="oc-tile-value">
+                        <span className="oc-icon" aria-hidden="true">{pressureIcon}</span>
+                        {pressureSide}
+                    </div>
+                </div>
+                <div className="oc-tile">
+                    <div className="oc-tile-label">Call buy</div>
+                    <div className="oc-tile-value">{callBuy ?? "-"}</div>
+                </div>
+                <div className="oc-tile">
+                    <div className="oc-tile-label">Put buy</div>
+                    <div className="oc-tile-value">{putBuy ?? "-"}</div>
+                </div>
+                <div className="oc-tile">
+                    <div className="oc-tile-label">Wait zone</div>
+                    <div className="oc-tile-value oc-tile-value-range">
+                        {waitLow !== null && waitHigh !== null && waitLow >= waitHigh
+                            ? "No zone"
+                            : `${waitLow ?? "-"} – ${waitHigh ?? "-"}`}
+                    </div>
+                    {waitLow !== null && waitHigh !== null && waitLow >= waitHigh && (
+                        <div className="oc-tile-sub">
+                            Levels overlap ({waitLow} ≥ {waitHigh})
+                        </div>
+                    )}
+                </div>
+                <div className="oc-tile">
+                    <div className="oc-tile-label">Spot</div>
+                    <div className="oc-tile-value">{oiSource ? oiSource.spot.toLocaleString("en-IN") : "-"}</div>
+                    <div className="oc-tile-sub">
+                        <span className="oc-live" aria-hidden="true" />
+                        Updated {lastUpdated.toLocaleTimeString()}
+                    </div>
+                </div>
             </div>
 
-            <table
-                border={1}
-                cellPadding={8}
-                cellSpacing={0}
-                style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}
-            >
-                <thead>
-                    <tr>
-                        <th>CE OI</th>
-                        <th>CE Chg</th>
-                        <th>CE LTP</th>
-                        <th>CE Vol</th>
-                        <th>Strike / Reversal Level</th>
-                        <th>PE Vol</th>
-                        <th>PE LTP</th>
-                        <th>PE Chg</th>
-                        <th>PE OI</th>
-                    </tr>
-                </thead>
-                <tbody>{tableRows}</tbody>
-            </table>
+            <div className="oc-toolbar">
+                <div className="oc-tabs" role="tablist" aria-label="View">
+                    <button
+                        type="button"
+                        role="tab"
+                        className="oc-tab"
+                        aria-selected={tab === "chain"}
+                        onClick={() => setTab("chain")}
+                    >
+                        Option Chain
+                    </button>
+                    <button
+                        type="button"
+                        role="tab"
+                        className="oc-tab"
+                        aria-selected={tab === "oi"}
+                        onClick={() => setTab("oi")}
+                    >
+                        OI Charts
+                    </button>
+                </div>
+                {tab === "chain" && (
+                    <div className="oc-legend">
+                        <span><i style={{ background: "#fbbf24" }} />ATM</span>
+                        <span><i style={{ outline: "2px solid #22c55e", outlineOffset: "-2px" }} />Max pain</span>
+                        <span><i style={{ background: "#38bdf8" }} />Highest</span>
+                        <span><i style={{ background: "#a855f7" }} />Second highest</span>
+                        <span><i style={{ background: "#e0f2fe" }} />Within 78%</span>
+                        <span className="oc-hint">Click any number to open its chart</span>
+                    </div>
+                )}
+            </div>
+
+            {tab === "chain" ? (
+                <div className="oc-table-wrap" ref={tableWrapRef}>
+                    <table className="oc-table">
+                        <thead>
+                            <tr>
+                                <th colSpan={4} className="oc-th-ce">
+                                    <span className="oc-group">
+                                        <i style={{ background: "var(--oi-ce)" }} />
+                                        Calls
+                                    </span>
+                                </th>
+                                <th className="oc-th-strike" />
+                                <th colSpan={4} className="oc-th-pe">
+                                    <span className="oc-group">
+                                        <i style={{ background: "var(--oi-pe)" }} />
+                                        Puts
+                                    </span>
+                                </th>
+                            </tr>
+                            <tr>
+                                <th className="oc-th-ce">OI</th>
+                                <th className="oc-th-ce">Chg OI</th>
+                                <th className="oc-th-ce">LTP</th>
+                                <th className="oc-th-ce">Volume</th>
+                                <th className="oc-th-strike">Strike / Reversal</th>
+                                <th className="oc-th-pe">Volume</th>
+                                <th className="oc-th-pe">LTP</th>
+                                <th className="oc-th-pe">Chg OI</th>
+                                <th className="oc-th-pe">OI</th>
+                            </tr>
+                        </thead>
+                        <tbody>{tableRows}</tbody>
+                    </table>
+                </div>
+            ) : (
+                <OIAnalytics
+                    source={oiSource}
+                    history={oiHistory}
+                    onOpenStrike={(strike) => setSelection({ strike, side: "CE", metric: "oi" })}
+                    levels={levels}
+                />
+            )}
+
+            {selection && (
+                <StrikeDrawer
+                    key={`${selection.strike}-${selection.side}-${selection.metric}`}
+                    selection={selection}
+                    source={oiSource}
+                    history={oiHistory}
+                    levels={levels}
+                    onClose={closeDrawer}
+                />
+            )}
         </div>
     );
 };

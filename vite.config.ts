@@ -1,5 +1,6 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import { BadInputError, getDailyChain } from "./api/_lib/bhavcopy.js";
 
 // Vite's dev server doesn't execute Vercel serverless functions (api/*.js) -
 // it just serves their source as static text. This mirrors api/option-chain.js
@@ -64,8 +65,48 @@ function nseOptionChainDevMiddleware(): Plugin {
     };
 }
 
+// Mirrors api/oi-history.js (daily end-of-day OI from the NSE bhavcopy) for `npm run dev`.
+function oiHistoryDevMiddleware(): Plugin {
+    return {
+        name: "oi-history-dev-middleware",
+        configureServer(server) {
+            server.middlewares.use("/api/oi-history", async (req, res) => {
+                const url = new URL(req.url ?? "", "http://localhost");
+                res.setHeader("Content-Type", "application/json");
+
+                try {
+                    const data = await getDailyChain({
+                        symbol: url.searchParams.get("symbol"),
+                        expiry: url.searchParams.get("expiry"),
+                        date: url.searchParams.get("date"),
+                    });
+
+                    if (!data) {
+                        res.statusCode = 404;
+                        res.end(JSON.stringify({ error: "No bhavcopy for this date" }));
+                        return;
+                    }
+
+                    res.statusCode = 200;
+                    res.end(JSON.stringify(data));
+                } catch (error) {
+                    const bad = error instanceof BadInputError;
+                    if (!bad) console.error("Error fetching bhavcopy:", error);
+                    res.statusCode = bad ? 400 : 500;
+                    res.end(
+                        JSON.stringify({
+                            error: bad ? (error as Error).message : "Failed to fetch daily OI history",
+                            message: error instanceof Error ? error.message : String(error),
+                        })
+                    );
+                }
+            });
+        },
+    };
+}
+
 export default defineConfig({
-    plugins: [react(), nseOptionChainDevMiddleware()],
+    plugins: [react(), nseOptionChainDevMiddleware(), oiHistoryDevMiddleware()],
 
     server: {
         proxy: {

@@ -30,18 +30,10 @@ const OptionChainFilters: React.FC<Props> = ({
     onRefresh,
 }) => {
     return (
-        <div
-            style={{
-                display: "flex",
-                gap: "12px",
-                marginBottom: "20px",
-                flexWrap: "wrap",
-            }}
-        >
-            <div>
-                <label>Type</label>
-                <br />
-                <select value={filters.type} onChange={onTypeChange}>
+        <div className="dash-filters">
+            <div className="dash-field">
+                <label htmlFor="oc-type">Type</label>
+                <select id="oc-type" value={filters.type} onChange={onTypeChange}>
                     {typeOptions.map((item) => (
                         <option key={item} value={item}>
                             {item}
@@ -50,10 +42,9 @@ const OptionChainFilters: React.FC<Props> = ({
                 </select>
             </div>
 
-            <div>
-                <label>Symbol</label>
-                <br />
-                <select value={filters.symbol} onChange={onSymbolChange}>
+            <div className="dash-field">
+                <label htmlFor="oc-symbol">Symbol</label>
+                <select id="oc-symbol" value={filters.symbol} onChange={onSymbolChange}>
                     {symbolOptions[filters.type].map((item) => (
                         <option key={item} value={item}>
                             {item}
@@ -62,10 +53,9 @@ const OptionChainFilters: React.FC<Props> = ({
                 </select>
             </div>
 
-            <div>
-                <label>Expiry</label>
-                <br />
-                <select value={filters.expiry} onChange={onExpiryChange}>
+            <div className="dash-field">
+                <label htmlFor="oc-expiry">Expiry</label>
+                <select id="oc-expiry" value={filters.expiry} onChange={onExpiryChange}>
                     {expiryDates.map((item) => (
                         <option key={item} value={item}>
                             {item}
@@ -74,9 +64,9 @@ const OptionChainFilters: React.FC<Props> = ({
                 </select>
             </div>
 
-            <div style={{ alignSelf: "end" }}>
-                <button onClick={onRefresh}>Refresh</button>
-            </div>
+            <button type="button" className="dash-btn" onClick={onRefresh}>
+                Refresh
+            </button>
         </div>
     );
 };

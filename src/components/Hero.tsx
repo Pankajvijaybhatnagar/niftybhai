@@ -3,6 +3,8 @@ import OptionChainService from "../services/optionchainServices";
 import OptionChainFilters from "./OptionChainFilters";
 import OptionChainTable from "./OptionChainTable";
 import type { Filters, FilterType, OptionChainRow } from "../types/optionChain";
+import "./oi/oiAnalytics.css";
+import "./dashboard.css";
 
 const Hero: React.FC = () => {
     const [filters, setFilters] = useState<Filters>({
@@ -100,23 +102,32 @@ const Hero: React.FC = () => {
     }, [filters.expiry]);
 
     return (
-        <div style={{ padding: "20px" }}>
-            <h2>Option Chain Dashboard</h2>
-            <OptionChainFilters
-                filters={filters}
-                expiryDates={expiryDates}
-                typeOptions={typeOptions}
-                symbolOptions={symbolOptions}
-                onTypeChange={handleTypeChange}
-                onSymbolChange={handleSymbolChange}
-                onExpiryChange={handleExpiryChange}
-                onRefresh={() => loadOptionChain(filters)}
-            />
-            <OptionChainTable
-                loading={loading}
-                optionChain={optionChain}
-                fetchOptionChain={fetchOptionChain}
-            />
+        <div className="dash oi-theme">
+            <header className="dash-header">
+                <div className="dash-brand">
+                    <h1>Option Chain Dashboard</h1>
+                    <p>
+                        {filters.symbol} · {filters.expiry || "Loading expiries"}
+                    </p>
+                </div>
+                <OptionChainFilters
+                    filters={filters}
+                    expiryDates={expiryDates}
+                    typeOptions={typeOptions}
+                    symbolOptions={symbolOptions}
+                    onTypeChange={handleTypeChange}
+                    onSymbolChange={handleSymbolChange}
+                    onExpiryChange={handleExpiryChange}
+                    onRefresh={() => loadOptionChain(filters)}
+                />
+            </header>
+            <main className="dash-main">
+                <OptionChainTable
+                    loading={loading}
+                    optionChain={optionChain}
+                    fetchOptionChain={fetchOptionChain}
+                />
+            </main>
         </div>
     );
 };
